@@ -3,6 +3,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from astropy.io import fits
+import torch
+from torch.utils.data import Dataset, DataLoader
 
 
 def _make_native_endian(array: np.ndarray) -> np.ndarray:
@@ -26,32 +28,51 @@ def _fits_hdu_to_dataframe(hdu) -> pd.DataFrame:
     array = _make_native_endian(array)
 
     if array.dtype.names is None:
+        if np.issubdtype(array.dtype, np.floating) and array.dtype == np.float64:
+            array = array.astype(np.float32)
         return pd.DataFrame(array)
 
     columns = {}
     for name in array.dtype.names:
         col = array[name]
         if isinstance(col, np.ndarray) and col.ndim > 1:
+            if np.issubdtype(col.dtype, np.floating) and col.dtype == np.float64:
+                col = col.astype(np.float32)
             columns[name] = [row.tolist() for row in col]
         elif isinstance(col, np.ndarray) and col.dtype == object:
-            columns[name] = [row.tolist() if isinstance(row, np.ndarray) else row for row in col]
+            processed_rows = []
+            for row in col:
+                if isinstance(row, np.ndarray):
+                    if np.issubdtype(row.dtype, np.floating) and row.dtype == np.float64:
+                        row = row.astype(np.float32)
+                    processed_rows.append(row.tolist())
+                else:
+                    processed_rows.append(row)
+            columns[name] = processed_rows
         else:
+            if isinstance(col, np.ndarray) and np.issubdtype(col.dtype, np.floating) and col.dtype == np.float64:
+                col = col.astype(np.float32)
             columns[name] = col
 
-    return pd.DataFrame(columns)
+    df = pd.DataFrame(columns)
+    for col_name in df.columns:
+        if df[col_name].dtype == np.float64:
+            df[col_name] = df[col_name].astype(np.float32)
+
+    return df
 
 
-def load_solexs_fits_table(file_path: str | Path, extension: int = 1) -> pd.DataFrame:
+def load_solexs_fits_table(file_path: str | Path, extension: int = 1, memmap: bool = True) -> pd.DataFrame:
     """Load the table from a SoLEXS FITS-like file (.lc, .gti, .pi)."""
     path = Path(file_path)
-    with fits.open(path, memmap=False) as hdul:
+    with fits.open(path, memmap=memmap) as hdul:
         if extension >= len(hdul):
             raise IndexError(f"Extension {extension} not found in {path}")
         hdu = hdul[extension]
         return _fits_hdu_to_dataframe(hdu)
 
 
-def extract_solexs_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".lc", ".gti", ".pi")) -> pd.DataFrame:
+def extract_solexs_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".lc", ".gti", ".pi"), memmap: bool = True) -> pd.DataFrame:
     """Extract all SoLEXS `.lc`, `.gti`, and `.pi` data under a root directory.
 
     Returns a single DataFrame containing rows from every table, with extra
@@ -68,7 +89,7 @@ def extract_solexs_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".lc"
             continue
 
         data_type = file_path.suffix.lower().lstrip('.')
-        with fits.open(file_path, memmap=False) as hdul:
+        with fits.open(file_path, memmap=memmap) as hdul:
             for extension, hdu in enumerate(hdul):
                 if hdu.data is None:
                     continue
@@ -87,10 +108,10 @@ def extract_solexs_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".lc"
     return pd.concat(records, ignore_index=True)
 
 
-def extract_solexs_file_data(file_path: str | Path) -> pd.DataFrame:
+def extract_solexs_file_data(file_path: str | Path, memmap: bool = True) -> pd.DataFrame:
     """Load one SoLEXS file into a DataFrame and add metadata columns."""
     file_path = Path(file_path)
-    df = load_solexs_fits_table(file_path)
+    df = load_solexs_fits_table(file_path, memmap=memmap)
     if df.empty:
         return df
     df.insert(0, "source_file", str(file_path))
@@ -101,17 +122,17 @@ def extract_solexs_file_data(file_path: str | Path) -> pd.DataFrame:
 
 # For HEL1OS data
 
-def load_hel1os_fits_table(file_path: str | Path, extension: int = 1) -> pd.DataFrame:
+def load_hel1os_fits_table(file_path: str | Path, extension: int = 1, memmap: bool = True) -> pd.DataFrame:
     """Load a table from a HEL1OS FITS file (.fits)."""
     path = Path(file_path)
-    with fits.open(path, memmap=False) as hdul:
+    with fits.open(path, memmap=memmap) as hdul:
         if extension >= len(hdul):
             raise IndexError(f"Extension {extension} not found in {path}")
         hdu = hdul[extension]
         return _fits_hdu_to_dataframe(hdu)
 
 
-def extract_hel1os_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".fits",)) -> pd.DataFrame:
+def extract_hel1os_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".fits",), memmap: bool = True) -> pd.DataFrame:
     """Extract all HEL1OS FITS table data under a root directory.
 
     Returns a concatenated DataFrame with metadata columns for the source file,
@@ -132,7 +153,7 @@ def extract_hel1os_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".fit
         if len(rel_parts) > 1 and rel_parts[-2] in {"aux", "cdte", "czt", "events"}:
             category = rel_parts[-2]
 
-        with fits.open(file_path, memmap=False) as hdul:
+        with fits.open(file_path, memmap=memmap) as hdul:
             for extension, hdu in enumerate(hdul):
                 if hdu.data is None or not hasattr(hdu, "columns") or hdu.columns is None:
                     continue
@@ -152,10 +173,10 @@ def extract_hel1os_data(root_dir: str | Path, suffixes: tuple[str, ...] = (".fit
     return pd.concat(records, ignore_index=True)
 
 
-def extract_hel1os_file_data(file_path: str | Path) -> pd.DataFrame:
+def extract_hel1os_file_data(file_path: str | Path, memmap: bool = True) -> pd.DataFrame:
     """Load one HEL1OS FITS file into a DataFrame and add metadata columns."""
     file_path = Path(file_path)
-    df = load_hel1os_fits_table(file_path)
+    df = load_hel1os_fits_table(file_path, memmap=memmap)
     if df.empty:
         return df
     df.insert(0, "source_file", str(file_path))
