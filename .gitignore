@@ -1,6 +1,12 @@
+# Remote default ignores
 *.i
 *.ii
 *.gpu
 *.ptx
 *.cubin
 *.fatbin
+
+# Local environment & data ignores
+.venv/
+hel1os_2026Jun29T054426034/
+solexs_2026Jun29T054518533/
