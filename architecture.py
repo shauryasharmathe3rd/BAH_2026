@@ -3,11 +3,11 @@ architecture.py
 
 This script contains the model definition, training/evaluation pipeline,
 and sampling/inference functions exported from the analysis notebook.
-It keeps only the main parts of the notebook and provides a clean interface
-for predicting solar flares.
+It supports both SoLEXS and HEL1OS datasets with instrument-specific normalization.
 """
 
 import os
+import glob
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -166,6 +166,18 @@ class ImprovedFlareForecasterLSTM(nn.Module):
 # 2. Helper Data Loading & Evaluation Functions
 # ============================================================================
 
+def make_native(df):
+    """Safely convert big-endian columns in FITS files to native endianness for pandas."""
+    for col in df.columns:
+        try:
+            val = df[col].values
+            if hasattr(val, 'dtype') and not val.dtype.isnative:
+                df[col] = val.astype(val.dtype.newbyteorder("="))
+        except Exception:
+            pass
+    return df
+
+
 def load_fits_to_df(file_path, extension=1):
     """Loads fits file table to pandas DataFrame."""
     with fits.open(file_path) as hdul:
@@ -250,67 +262,140 @@ def evaluate_model(model, dataloader, criterion, device):
 # 3. Model Training Loop
 # ============================================================================
 
-def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, batch_size=64):
+def train_model(data_dir='Data', weights_path='flare_lstm_weights.pth', num_epochs=5, batch_size=64):
     """
-    Trains the ImprovedFlareForecasterLSTM model on the FITS light curve data.
-    Matches the exact training parameters and chronological splitting from the notebook.
+    Trains the ImprovedFlareForecasterLSTM model on both SoLEXS and HEL1OS datasets.
+    Preprocesses, normalizes, and splits them chronologically separately to avoid data logic mixing.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # 1. Load the raw light curve data
-    print(f"Loading raw data from {lc_path}...")
-    lc_df = load_fits_to_df(lc_path)
+    # 1. Discover and load SoLEXS and HEL1OS data
+    print("Loading data files...")
+    solexs_files = sorted(glob.glob(os.path.join(data_dir, 'solexs_*/**/*.lc'), recursive=True))
+    hel1os_files = sorted(glob.glob(os.path.join(data_dir, 'hel1os_*/**/lightcurve_*.fits'), recursive=True))
     
-    # 2. Create target label: 1 if COUNTS > 1000, 0 otherwise
+    dfs = []
+    
+    # Load SoLEXS
+    for file_path in solexs_files:
+        with fits.open(file_path) as hdul:
+            df = pd.DataFrame(hdul[1].data)
+        df = make_native(df)
+        df = df.dropna(subset=['TIME', 'COUNTS'])
+        df = df[['TIME', 'COUNTS']].copy()
+        df['is_flare'] = (df['COUNTS'] > 1000).astype(np.float32)
+        df['source'] = os.path.basename(file_path)
+        df['instrument'] = 'solexs'
+        dfs.append(df)
+        
+    # Load HEL1OS
+    for file_path in hel1os_files:
+        with fits.open(file_path) as hdul:
+            for i, hdu in enumerate(hdul):
+                if hdu.data is not None and hdu.columns is not None and 'CTR' in hdu.columns.names:
+                    df = pd.DataFrame(hdu.data)
+                    df = make_native(df)
+                    
+                    if df['ISOT'].dtype == object:
+                        isot_col = df['ISOT'].apply(lambda x: x.decode('utf-8') if isinstance(x, bytes) else x)
+                    else:
+                        isot_col = df['ISOT']
+                    
+                    df['TIME'] = pd.to_datetime(isot_col).astype('datetime64[ns]').astype('int64') // 10**9
+                    df['COUNTS'] = df['CTR']
+                    df = df.dropna(subset=['TIME', 'COUNTS'])
+                    df = df[['TIME', 'COUNTS']].copy()
+                    df['is_flare'] = (df['COUNTS'] > 200).astype(np.float32)
+                    df['source'] = os.path.basename(file_path) + '_' + hdu.name
+                    df['instrument'] = 'hel1os'
+                    dfs.append(df)
+                    
+    if not dfs:
+        raise ValueError(f"No valid data files found in {data_dir} directory.")
+        
+    df_clean = pd.concat(dfs, ignore_index=True)
+    print(f"Total rows loaded: {df_clean.shape[0]}")
+    print(df_clean['instrument'].value_counts())
+    
+    # 2. Define features & sliding windows configurations
     feature_cols = ['TIME', 'COUNTS']
     label_col = 'is_flare'
-    df_clean = lc_df.copy()
-    df_clean[label_col] = (df_clean['COUNTS'] > 1000).astype(np.float32)
-    
-    # 3. Chronological split (80% train, 20% test)
-    train_split = 0.8
-    split_idx = int(len(df_clean) * train_split)
-    train_df = df_clean.iloc[:split_idx].copy()
-    test_df = df_clean.iloc[split_idx:].copy()
-    
-    print(f"Train DataFrame shape: {train_df.shape}")
-    print(f"Test DataFrame shape: {test_df.shape}")
-    
-    # 4. Create sliding windows (window size: 60 timesteps, step size: 1)
     window_size = 60
     step_size = 1
     
-    print("Creating sliding windows...")
-    X_train, y_train = sw.create_sliding_windows(
-        train_df, 
-        feature_cols=feature_cols, 
-        label_col=label_col, 
-        window_size=window_size, 
-        step_size=step_size,
-        normalize=True
-    )
-    X_test, y_test = sw.create_sliding_windows(
-        test_df, 
-        feature_cols=feature_cols, 
-        label_col=label_col, 
-        window_size=window_size, 
-        step_size=step_size,
-        normalize=True
-    )
+    X_train_list = []
+    y_train_list = []
+    X_test_list = []
+    y_test_list = []
     
-    print(f"X_train shape: {X_train.shape}, y_train: {y_train.shape}")
-    print(f"X_test shape: {X_test.shape}, y_test: {y_test.shape}")
+    # Group by instrument to perform separate normalization
+    for instrument, inst_grp in df_clean.groupby('instrument'):
+        features = inst_grp[feature_cols].values.astype(np.float32)
+        valid_idx = ~np.any(np.isnan(features), axis=1)
+        features = features[valid_idx]
+        labels = inst_grp.loc[valid_idx, label_col].values
+        
+        # Compute instrument-specific training split stats (using first 80%)
+        split_idx = int(len(features) * 0.8)
+        train_features = features[:split_idx]
+        feature_mean = np.nanmean(train_features, axis=0, keepdims=True)
+        feature_std = np.nanstd(train_features, axis=0, keepdims=True)
+        feature_std[feature_std == 0] = 1.0
+        
+        # Normalize the entire instrument group with its own statistics
+        normalized_features = (features - feature_mean) / feature_std
+        
+        inst_grp_clean = inst_grp.loc[valid_idx].copy()
+        inst_grp_clean['NORM_TIME'] = normalized_features[:, 0]
+        inst_grp_clean['NORM_COUNTS'] = normalized_features[:, 1]
+        
+        # Group by source file to prevent sliding windows from mixing different files
+        for file_path, file_grp in inst_grp_clean.groupby('source'):
+            file_features = file_grp[['NORM_TIME', 'NORM_COUNTS']].values.astype(np.float32)
+            file_labels = file_grp[label_col].values.astype(np.float32)
+            
+            # Chronological split within this file (80% train, 20% test)
+            f_split_idx = int(len(file_features) * 0.8)
+            
+            train_feats = file_features[:f_split_idx]
+            train_lbls = file_labels[:f_split_idx]
+            test_feats = file_features[f_split_idx:]
+            test_lbls = file_labels[f_split_idx:]
+            
+            # Helper to generate sliding windows
+            def make_windows(feats, lbls):
+                num_samples = feats.shape[0]
+                xs, ys = [], []
+                for i in range(0, num_samples - window_size + 1, step_size):
+                    if i + window_size < num_samples:
+                        xs.append(feats[i : i + window_size])
+                        ys.append(lbls[i + window_size])
+                return xs, ys
+                
+            tr_x, tr_y = make_windows(train_feats, train_lbls)
+            te_x, te_y = make_windows(test_feats, test_lbls)
+            
+            X_train_list.extend(tr_x)
+            y_train_list.extend(tr_y)
+            X_test_list.extend(te_x)
+            y_test_list.extend(te_y)
+            
+    X_train = np.array(X_train_list, dtype=np.float32)
+    y_train = np.array(y_train_list, dtype=np.float32)
+    X_test = np.array(X_test_list, dtype=np.float32)
+    y_test = np.array(y_test_list, dtype=np.float32)
     
-    # 5. Create PyTorch datasets and DataLoaders
+    print(f"Sliding window sequences - X_train: {X_train.shape}, X_test: {X_test.shape}")
+    
+    # 3. Create datasets and loaders
     train_dataset = sw.FlareForecastDataset(X_train, y_train)
     test_dataset = sw.FlareForecastDataset(X_test, y_test)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
-    # 6. Initialize Model
-    print("Initializing model...")
+    # 4. Initialize Model
     model = ImprovedFlareForecasterLSTM(
         input_dim=2,
         hidden_dim=128,
@@ -321,7 +406,6 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
         bidirectional=True
     ).to(device)
     
-    # Loss, Optimizer, and Scheduler
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
@@ -336,7 +420,6 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
         for batch_idx, (X_batch, y_batch) in enumerate(train_loader):
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             
-            # Forward pass
             outputs = model(X_batch)
             if isinstance(outputs, tuple):
                 y_pred = outputs[0]
@@ -346,11 +429,8 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
             y_pred = y_pred.squeeze(-1)
             loss = criterion(y_pred, y_batch)
             
-            # Backward pass
             optimizer.zero_grad()
             loss.backward()
-            
-            # Gradient clipping to stabilize LSTM training
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
@@ -359,7 +439,7 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
             correct += (preds == y_batch).sum().item()
             total += y_batch.size(0)
             
-            if (batch_idx + 1) % 200 == 0:
+            if (batch_idx + 1) % 500 == 0:
                 print(f"Epoch [{epoch+1}/{num_epochs}], Batch [{batch_idx+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
                 
         epoch_loss = running_loss / len(train_loader.dataset)
@@ -368,7 +448,6 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
         
         scheduler.step(epoch_loss)
         
-    # Evaluate model
     print("Evaluating model...")
     metrics = evaluate_model(model, test_loader, criterion, device)
     print("\n================ EVALUATION RESULTS ================")
@@ -379,7 +458,6 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
             print(f"{k:<12}: {v}")
     print("====================================================")
     
-    # Save the trained weights
     torch.save(model.state_dict(), weights_path)
     print(f"✅ Model weights saved for production to: {weights_path}")
     
@@ -390,7 +468,7 @@ def train_model(lc_path, weights_path='flare_lstm_weights.pth', num_epochs=5, ba
 # 4. Sampling / Inference Function for API Server and Interaction
 # ============================================================================
 
-def predict_flare(sequence_data, model=None, model_weights_path='flare_lstm_weights.pth', device=None):
+def predict_flare(sequence_data, instrument='solexs', model=None, model_weights_path='flare_lstm_weights.pth', device=None):
     """
     Predicts the probability of a solar flare occurring in the next timestep
     given a sequence of the last 60 timesteps of ['TIME', 'COUNTS'] data.
@@ -399,6 +477,8 @@ def predict_flare(sequence_data, model=None, model_weights_path='flare_lstm_weig
         sequence_data (np.ndarray, list, or pd.DataFrame): 
             Input sequence of shape (60, 2) or (batch_size, 60, 2).
             Features must be in order: [TIME, COUNTS].
+        instrument (str): Instrument type, either 'solexs' or 'hel1os'.
+            This determines the specific normalization mean and standard deviation.
         model (nn.Module, optional): An already loaded and instantiated model.
             If provided, avoids loading weights from disk.
         model_weights_path (str): Path to the trained weights file.
@@ -435,12 +515,19 @@ def predict_flare(sequence_data, model=None, model_weights_path='flare_lstm_weig
     else:
         raise ValueError(f"Input sequence must be 2D (60, 2) or 3D (batch_size, 60, 2), got {arr.ndim} dimensions")
         
-    # Normalization using the training set statistics calculated from the notebook:
-    # Mean: [1.7137284e+09, 4.2081741e+02]
-    # Std:  [1.3463169e+06, 5.7675787e+02]
-    mean = np.array([1.7137284e+09, 4.2081741e+02], dtype=np.float32)
-    std = np.array([1.3463169e+06, 5.7675787e+02], dtype=np.float32)
-    
+    # Normalize features based on instrument statistics
+    # SoLEXS Mean: [1.7151514e+09, 722.7386], Std: [91871.33, 1324.5471]
+    # HEL1OS Mean: [1.715076e+09, 9.304749], Std: [25588.596, 92.98037]
+    instrument = str(instrument).lower().strip()
+    if instrument == 'solexs':
+        mean = np.array([1.7151514e+09, 722.7386], dtype=np.float32)
+        std = np.array([91871.33, 1324.5471], dtype=np.float32)
+    elif instrument == 'hel1os':
+        mean = np.array([1.715076e+09, 9.304749], dtype=np.float32)
+        std = np.array([25588.596, 92.98037], dtype=np.float32)
+    else:
+        raise ValueError(f"Unknown instrument type '{instrument}'. Choose 'solexs' or 'hel1os'.")
+        
     normalized_arr = (arr - mean) / std
     
     # Convert to PyTorch tensor
@@ -471,7 +558,7 @@ def predict_flare(sequence_data, model=None, model_weights_path='flare_lstm_weig
             probs = outputs
         probs = probs.squeeze(-1).cpu().numpy()
         
-    # Ensure it's iterable even for single prediction
+    # Ensure it's iterable
     if not isinstance(probs, np.ndarray) or probs.ndim == 0:
         probs = np.array([probs])
         
@@ -492,13 +579,11 @@ def predict_flare(sequence_data, model=None, model_weights_path='flare_lstm_weig
 # ============================================================================
 
 if __name__ == '__main__':
-    # Default file path
-    default_lc_file = '/home/shaurya/Documents/Antigravity/BAH_Project/solexs_2026Jun29T054518533/AL1_SLX_L1_20240507_v1.0/SDD2/AL1_SOLEXS_20240507_SDD2_L1.lc'
+    default_data_dir = 'Data'
     weights_file = 'flare_lstm_weights.pth'
     
-    if os.path.exists(default_lc_file):
-        print("Starting model training and evaluation using notebook logic...")
-        train_model(default_lc_file, weights_path=weights_file)
+    if os.path.exists(default_data_dir):
+        print("Starting model training and evaluation using combined notebook logic...")
+        train_model(default_data_dir, weights_path=weights_file)
     else:
-        print(f"FITS data file not found at {default_lc_file}.")
-        print("If you have it placed elsewhere, run `train_model(lc_path)` manually.")
+        print(f"Data directory not found at {default_data_dir}.")
