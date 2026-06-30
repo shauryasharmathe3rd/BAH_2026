@@ -380,35 +380,35 @@ ARCHITECTURE COMPARISON & IMPROVEMENTS
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│ IMPROVED MODEL: ImprovedFlareForecasterLSTM                        │
+│ IMPROVED MODEL: ImprovedFlareForecasterLSTM                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │ ENHANCEMENTS:                                                       │
-│ ✓ Bidirectional LSTM (sees patterns forward & backward)           │
-│ ✓ Multi-head attention (focuses on important time steps)          │
-│ ✓ Larger capacity (128 hidden units, 3 layers)                    │
-│ ✓ Batch normalization (input + intermediate layers)               │
-│ ✓ Multi-layer FC head (better feature transformation)             │
-│ ✓ Residual connections (improved gradient flow)                   │
-│ ✓ Configurable dropout (0.3) for regularization                   │
+│ ✓ Bidirectional LSTM (sees patterns forward & backward)             │
+│ ✓ Multi-head attention (focuses on important time steps)            │
+│ ✓ Larger capacity (128 hidden units, 3 layers)                      │
+│ ✓ Batch normalization (input + intermediate layers)                 │
+│ ✓ Multi-layer FC head (better feature transformation)               │
+│ ✓ Residual connections (improved gradient flow)                     │
+│ ✓ Configurable dropout (0.3) for regularization                     │
 │                                                                     │
 │ BENEFITS:                                                           │
-│ • Captures bidirectional temporal patterns                         │
-│ • Learns to attend to critical pre-flare signatures               │
-│ • Better gradient flow for training deep networks                 │
-│ • Improved generalization & robustness                            │
+│ • Captures bidirectional temporal patterns                          │
+│ • Learns to attend to critical pre-flare signatures                 │
+│ • Better gradient flow for training deep networks                  │
+│ • Improved generalization & robustness                             │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│ ALTERNATIVE: LSTMWithTemporalCNN                                   │
+│ ALTERNATIVE: LSTMWithTemporalCNN                                    │
 ├─────────────────────────────────────────────────────────────────────┤
-│ • Conv1D layer detects local temporal patterns (short-term)       │
-│ • LSTM captures long-range dependencies (long-term)               │
-│ • Hybrid approach combines both scales efficiently                │
+│ • Conv1D layer detects local temporal patterns (short-term)         │
+│ • LSTM captures long-range dependencies (long-term)                 │
+│ • Hybrid approach combines both scales efficiently                  │
 │                                                                     │
 │ USE WHEN:                                                           │
-│ • Data has strong local temporal patterns (spikes, dips)         │
-│ • Computational efficiency is critical                            │
-│ • Sliding window has short sequences (< 100 timesteps)           │
+│ • Data has strong local temporal patterns (spikes, dips)            │
+│ • Computational efficiency is critical                              │
+│ • Sliding window has short sequences (< 100 timesteps)              │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐

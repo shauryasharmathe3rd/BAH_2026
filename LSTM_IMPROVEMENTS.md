@@ -383,8 +383,9 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
     mode='min',
     factor=0.5,
-    patience=5,
-    verbose=True
+    patience=5
+    # Note: 'verbose' parameter is deprecated/removed in PyTorch 2.2+.
+    # Print or log the learning rate manually if needed (e.g., using optimizer.param_groups[0]['lr']).
 )
 ```
 

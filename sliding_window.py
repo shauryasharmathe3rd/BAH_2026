@@ -79,11 +79,13 @@ def create_sliding_windows(
         if drop_nulls and np.any(np.isnan(window)):
             continue
         
-        windows_X.append(window)
-        
         # Get label (flare in next step after window)
-        if labels is not None and i + window_size < num_samples:
-            windows_y.append(labels[i + window_size])
+        if labels is not None:
+            if i + window_size < num_samples:
+                windows_X.append(window)
+                windows_y.append(labels[i + window_size])
+        else:
+            windows_X.append(window)
     
     X = np.array(windows_X, dtype=np.float32)  # (num_windows, window_size, num_features)
     y = np.array(windows_y, dtype=np.float32) if windows_y else None
