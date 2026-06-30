@@ -155,11 +155,10 @@ class ImprovedFlareForecasterLSTM(nn.Module):
         fc2_out = self.dropout2(fc2_out)
         
         logits = self.fc_out(fc2_out)
-        probability = self.sigmoid(logits)
         
         if return_attention:
-            return probability, attention_weights
-        return probability
+            return logits, attention_weights
+        return logits
 
 
 # ============================================================================
@@ -219,7 +218,8 @@ def evaluate_model(model, dataloader, criterion, device):
             loss = criterion(y_pred, y_batch)
             
             test_loss += loss.item() * X_batch.size(0)
-            all_preds.append(y_pred.cpu().numpy())
+            probs = torch.sigmoid(y_pred)
+            all_preds.append(probs.cpu().numpy())
             all_targets.append(y_batch.cpu().numpy())
             
     avg_loss = test_loss / len(dataloader.dataset)
@@ -336,15 +336,12 @@ def train_model(data_dir='Data', weights_path='flare_lstm_weights.pth', num_epoc
         features = features[valid_idx]
         labels = inst_grp.loc[valid_idx, label_col].values
         
-        # Compute instrument-specific training split stats (using first 80%)
+        # Compute instrument-specific training split stats (using first 80%) using StandardScaler
         split_idx = int(len(features) * 0.8)
-        train_features = features[:split_idx]
-        feature_mean = np.nanmean(train_features, axis=0, keepdims=True)
-        feature_std = np.nanstd(train_features, axis=0, keepdims=True)
-        feature_std[feature_std == 0] = 1.0
-        
-        # Normalize the entire instrument group with its own statistics
-        normalized_features = (features - feature_mean) / feature_std
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        scaler.fit(features[:split_idx])
+        normalized_features = scaler.transform(features)
         
         inst_grp_clean = inst_grp.loc[valid_idx].copy()
         inst_grp_clean['NORM_TIME'] = normalized_features[:, 0]
@@ -406,7 +403,14 @@ def train_model(data_dir='Data', weights_path='flare_lstm_weights.pth', num_epoc
         bidirectional=True
     ).to(device)
     
-    criterion = nn.BCELoss()
+    # Calculate pos_weight based on class imbalance
+    num_neg = np.sum(y_train == 0)
+    num_pos = np.sum(y_train == 1)
+    weight_ratio = num_neg / num_pos if num_pos > 0 else 1.0
+    pos_weight = torch.tensor([weight_ratio], dtype=torch.float32).to(device)
+    print(f"BCEWithLogitsLoss class pos_weight ratio: {weight_ratio:.4f}")
+    
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
@@ -435,7 +439,7 @@ def train_model(data_dir='Data', weights_path='flare_lstm_weights.pth', num_epoc
             optimizer.step()
             
             running_loss += loss.item() * X_batch.size(0)
-            preds = (y_pred >= 0.5).float()
+            preds = (torch.sigmoid(y_pred) >= 0.5).float()
             correct += (preds == y_batch).sum().item()
             total += y_batch.size(0)
             
@@ -553,10 +557,10 @@ def predict_flare(sequence_data, instrument='solexs', model=None, model_weights_
     with torch.no_grad():
         outputs = model(x_tensor)
         if isinstance(outputs, tuple):
-            probs = outputs[0]
+            logits = outputs[0]
         else:
-            probs = outputs
-        probs = probs.squeeze(-1).cpu().numpy()
+            logits = outputs
+        probs = torch.sigmoid(logits).squeeze(-1).cpu().numpy()
         
     # Ensure it's iterable
     if not isinstance(probs, np.ndarray) or probs.ndim == 0:
