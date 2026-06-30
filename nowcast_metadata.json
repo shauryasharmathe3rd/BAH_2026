@@ -1,0 +1,26 @@
+{
+    "input_dim": 2,
+    "feature_cols": [
+        "TIME",
+        "COUNTS"
+    ],
+    "feature_means": [
+        1715083264.0,
+        516.1762084960938
+    ],
+    "feature_stds": [
+        24941.3125,
+        614.123046875
+    ],
+    "window_size": 60,
+    "best_val_loss": 0.0004948942111837306,
+    "metrics": {
+        "TP": 0,
+        "FP": 0,
+        "FN": 1,
+        "TN": 17267,
+        "TSS": 0.0,
+        "Recall": 0.0,
+        "Precision": 0.0
+    }
+}
