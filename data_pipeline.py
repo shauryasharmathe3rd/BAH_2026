@@ -3,8 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-import torch
-from torch.utils.data import Dataset, DataLoader
+
 
 
 def _make_native_endian(array: np.ndarray) -> np.ndarray:

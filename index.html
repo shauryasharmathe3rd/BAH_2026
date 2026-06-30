@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aditya-L1 Solar Flare Real-Time Nowcasting Dashboard</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@400;600;900&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #0b0b16;
+            --panel-bg: rgba(18, 18, 38, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-color: #f3f3f6;
+            --text-muted: #8c8ca0;
+            --accent-cyan: #00f0ff;
+            --accent-orange: #ff9900;
+            --accent-red: #ff3366;
+            --accent-green: #33cc66;
+            --glow-cyan: 0 0 15px rgba(0, 240, 255, 0.35);
+            --glow-red: 0 0 25px rgba(255, 51, 102, 0.7);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 10% 20%, rgba(0, 240, 255, 0.05) 0px, transparent 50%),
+                radial-gradient(at 90% 80%, rgba(255, 51, 102, 0.05) 0px, transparent 50%);
+            background-attachment: fixed;
+            color: var(--text-color);
+            overflow-x: hidden;
+            padding: 24px;
+        }
+
+        h1, h2, h3, .brand-title {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        /* Container & Layout */
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 24px;
+        }
+
+        /* Header block */
+        header {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent-orange), var(--accent-red));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 0 15px rgba(255, 153, 0, 0.4);
+            animation: pulse-glow 3s infinite;
+        }
+
+        .brand-title {
+            font-size: 26px;
+            font-weight: 900;
+            background: linear-gradient(90deg, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .live-status-tag {
+            background: rgba(0, 240, 255, 0.1);
+            border: 1px solid var(--accent-cyan);
+            color: var(--accent-cyan);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: var(--glow-cyan);
+        }
+
+        /* Glassmorphism Panel styles */
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* Sidebar Controls */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .control-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        select, input[type="range"], button {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-color);
+            padding: 10px;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        select:focus, select:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(0, 240, 255, 0.2);
+        }
+
+        /* Speed slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        /* Trigger indicators */
+        .alert-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.5s ease;
+        }
+
+        .alert-card.active-alert {
+            background: rgba(255, 51, 102, 0.15);
+            border-color: var(--accent-red);
+            box-shadow: var(--glow-red);
+        }
+
+        .alert-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .alert-title {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .alert-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .status-dot {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background-color: var(--accent-green);
+            box-shadow: 0 0 10px rgba(51, 204, 102, 0.5);
+            transition: all 0.5s ease;
+        }
+
+        .status-dot.active {
+            background-color: var(--accent-red);
+            box-shadow: var(--glow-red);
+            animation: blink 1s infinite alternate;
+        }
+
+        /* Simulation Buttons */
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan), #0077ff);
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            box-shadow: var(--glow-cyan);
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        /* Main Workspace Panel */
+        .main-workspace {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Telemetry Cards */
+        .telemetry-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .telemetry-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 90px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .telemetry-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: var(--border-color);
+        }
+
+        .telemetry-card.cyan::before { background: var(--accent-cyan); }
+        .telemetry-card.orange::before { background: var(--accent-orange); }
+        .telemetry-card.red::before { background: var(--accent-red); }
+
+        .telemetry-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+
+        .telemetry-value {
+            font-size: 26px;
+            font-weight: 800;
+            font-family: 'Outfit', sans-serif;
+            margin-top: 4px;
+        }
+
+        /* Main Chart Area */
+        .chart-panel {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 380px;
+            width: 100%;
+        }
+
+        /* Event Catalogue Area */
+        .catalogue-panel {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .badge.joint {
+            background: rgba(255, 153, 0, 0.15);
+            color: var(--accent-orange);
+            border: 1px solid rgba(255, 153, 0, 0.3);
+        }
+
+        .badge.soft {
+            background: rgba(0, 240, 255, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+        }
+
+        .badge.hard {
+            background: rgba(255, 51, 102, 0.15);
+            color: var(--accent-red);
+            border: 1px solid rgba(255, 51, 102, 0.3);
+        }
+
+        /* Animations */
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 10px rgba(255, 153, 0, 0.4); }
+            50% { box-shadow: 0 0 25px rgba(255, 153, 0, 0.7); }
+        }
+
+        @keyframes blink {
+            from { opacity: 1; filter: drop-shadow(0 0 15px rgba(255, 51, 102, 0.8)); }
+            to { opacity: 0.3; filter: drop-shadow(0 0 2px rgba(255, 51, 102, 0.2)); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-container">
+        
+        <!-- Header -->
+        <header>
+            <div class="brand-section">
+                <div class="brand-logo">☀️</div>
+                <div>
+                    <h1 class="brand-title">Aditya-L1 Nowcast</h1>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Solar Flare Real-Time Algorithmic Change Detection</div>
+                </div>
+            </div>
+            <div class="live-status-tag">Dashboard Live</div>
+        </header>
+
+        <!-- Sidebar controls -->
+        <div class="sidebar panel">
+            
+            <div class="alert-card" id="alertCard">
+                <div class="alert-info">
+                    <span class="alert-title" id="alertTitle">SYSTEM QUIET</span>
+                    <span class="alert-subtitle" id="alertSubtitle">Monitoring telemetry...</span>
+                </div>
+                <div class="status-dot" id="statusDot"></div>
+            </div>
+
+            <div class="control-group">
+                <label class="control-label">Select Day</label>
+                <select id="daySelect">
+                    <option value="20240507">May 7, 2024 (Major Flares)</option>
+                    <option value="20240509">May 9, 2024 (Active Flare)</option>
+                    <option value="20240510">May 10, 2024 (Quiet Day)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label class="control-label">Instrument Channel</label>
+                <select id="instSelect">
+                    <option value="solexs">SoLEXS SDD2 (Soft X-Ray)</option>
+                    <option value="hel1os">HEL1OS CZT1 (Hard X-Ray)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label class="control-label">Simulation Speed</label>
+                <div class="slider-container">
+                    <input type="range" id="speedSlider" min="1" max="100" value="30">
+                    <span style="font-size: 13px; font-weight: bold; width: 40px;" id="speedText">30x</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label class="control-label">Sigma Multiplier (k)</label>
+                <div class="slider-container">
+                    <input type="range" id="kSlider" min="2.0" max="6.0" step="0.5" value="3.5">
+                    <span style="font-size: 13px; font-weight: bold; width: 40px;" id="kText">3.5σ</span>
+                </div>
+            </div>
+
+            <button class="btn-primary" id="playBtn">Play Simulation</button>
+
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="main-workspace">
+            
+            <!-- Telemetry Values -->
+            <div class="telemetry-row">
+                <div class="telemetry-card cyan">
+                    <span class="telemetry-label">Live Count Rate</span>
+                    <span class="telemetry-value" id="valCounts">0.0</span>
+                </div>
+                <div class="telemetry-card orange">
+                    <span class="telemetry-label">Rolling Mean (μ)</span>
+                    <span class="telemetry-value" id="valMean">0.0</span>
+                </div>
+                <div class="telemetry-card orange">
+                    <span class="telemetry-label">Rolling Std (σ)</span>
+                    <span class="telemetry-value" id="valStd">0.0</span>
+                </div>
+                <div class="telemetry-card red">
+                    <span class="telemetry-label">Z-Score Value</span>
+                    <span class="telemetry-value" id="valZ">0.00</span>
+                </div>
+            </div>
+
+            <!-- Chart panel -->
+            <div class="chart-panel panel">
+                <div class="chart-container">
+                    <canvas id="liveChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Master Event Catalogue -->
+            <div class="catalogue-panel panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Joint Master Event Catalogue</h2>
+                    <span style="font-size: 12px; color: var(--text-muted);">Decoded via Neupert Effect association</span>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Start (UNIX)</th>
+                            <th>Peak Soft (SXR)</th>
+                            <th>Peak Hard (HXR)</th>
+                            <th>End (UNIX)</th>
+                            <th>Peak SXR (cts/s)</th>
+                            <th>Peak HXR (cts/s)</th>
+                            <th>Neupert Delay</th>
+                        </tr>
+                    </thead>
+                    <tbody id="catalogueBody">
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: var(--text-muted);">No catalogued events loaded yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        // Configuration
+        let dataPoints = [];
+        let currentIndex = 0;
+        let isPlaying = false;
+        let timerId = null;
+        let speed = 30; // ms per step
+        let k_val = 3.5;
+        let bgWindowSize = 600; // seconds
+
+        // Live stats tracking
+        let rollingHistory = [];
+
+        // DOM elements
+        const playBtn = document.getElementById("playBtn");
+        const speedSlider = document.getElementById("speedSlider");
+        const speedText = document.getElementById("speedText");
+        const kSlider = document.getElementById("kSlider");
+        const kText = document.getElementById("kText");
+        const daySelect = document.getElementById("daySelect");
+        const instSelect = document.getElementById("instSelect");
+        
+        const valCounts = document.getElementById("valCounts");
+        const valMean = document.getElementById("valMean");
+        const valStd = document.getElementById("valStd");
+        const valZ = document.getElementById("valZ");
+        
+        const alertCard = document.getElementById("alertCard");
+        const alertTitle = document.getElementById("alertTitle");
+        const alertSubtitle = document.getElementById("alertSubtitle");
+        const statusDot = document.getElementById("statusDot");
+        const catalogueBody = document.getElementById("catalogueBody");
+
+        // Set up Chart.js
+        const ctx = document.getElementById('liveChart').getContext('2d');
+        const chartData = {
+            labels: [],
+            datasets: [
+                {
+                    label: 'Live Count Rate (cts/s)',
+                    data: [],
+                    borderColor: '#00f0ff',
+                    borderWidth: 1.5,
+                    fill: false,
+                    pointRadius: 0
+                },
+                {
+                    label: 'Sigma Threshold (μ + kσ)',
+                    data: [],
+                    borderColor: '#ff3366',
+                    borderWidth: 1.5,
+                    borderDash: [5, 5],
+                    fill: false,
+                    pointRadius: 0
+                }
+            ]
+        };
+
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#8c8ca0', maxTicksLimit: 10 }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#8c8ca0' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#f3f3f6' }
+                    }
+                }
+            }
+        });
+
+        // Initialize App
+        loadDataset();
+        loadCatalogue();
+
+        // Event Listeners
+        daySelect.addEventListener("change", loadDataset);
+        instSelect.addEventListener("change", loadDataset);
+
+        speedSlider.addEventListener("input", (e) => {
+            speed = 101 - e.target.value; // Invert so higher value = faster simulation
+            speedText.textContent = `${e.target.value}x`;
+            if (isPlaying) {
+                pauseSimulation();
+                playSimulation();
+            }
+        });
+
+        kSlider.addEventListener("input", (e) => {
+            k_val = parseFloat(e.target.value);
+            kText.textContent = `${k_val}σ`;
+        });
+
+        playBtn.addEventListener("click", () => {
+            if (isPlaying) {
+                pauseSimulation();
+            } else {
+                playSimulation();
+            }
+        });
+
+        // Fetch Data from Server
+        function loadDataset() {
+            pauseSimulation();
+            const day = daySelect.value;
+            const instrument = instSelect.value;
+            
+            // Adjust options: May 9 and May 10 only have SoLEXS
+            if (day !== "20240507" && instrument === "hel1os") {
+                instSelect.value = "solexs";
+                alert("HEL1OS CZT data is only available for May 7th in the demo folder. Switched to SoLEXS.");
+                return;
+            }
+
+            chartData.labels = [];
+            chartData.datasets[0].data = [];
+            chartData.datasets[1].data = [];
+            chartData.datasets[0].borderColor = instrument === "solexs" ? '#00f0ff' : '#ff9900';
+            chart.update();
+
+            currentIndex = 0;
+            rollingHistory = [];
+            
+            fetch(`/api/stream?day=${day}&instrument=${instrument}`)
+                .then(res => res.json())
+                .then(payload => {
+                    if (payload.error) {
+                        alert(payload.error);
+                        return;
+                    }
+                    dataPoints = payload.data;
+                    console.log(`Loaded ${dataPoints.length} points.`);
+                    playSimulation();
+                })
+                .catch(err => {
+                    console.error("Error loading stream data:", err);
+                    alert("Could not load data. Ensure api_server.py is running.");
+                });
+        }
+
+        function loadCatalogue() {
+            fetch("/api/catalogue")
+                .then(res => res.json())
+                .then(data => {
+                    if (data.events && data.events.length > 0) {
+                        let html = "";
+                        data.events.forEach(evt => {
+                            let typeClass = evt.source_type.toLowerCase();
+                            let delayText = evt.neupert_delay_sec !== null ? `${evt.neupert_delay_sec}s (${(evt.neupert_delay_sec/60).toFixed(1)}m)` : "-";
+                            let peakSoft = evt.peak_time_soft !== null ? evt.peak_time_soft : "-";
+                            let peakHard = evt.peak_time_hard !== null ? evt.peak_time_hard : "-";
+                            let rateSoft = evt.peak_rate_soft !== null ? evt.peak_rate_soft.toFixed(1) : "-";
+                            let rateHard = evt.peak_rate_hard !== null ? evt.peak_rate_hard.toFixed(1) : "-";
+
+                            html += `
+                                <tr>
+                                    <td><span class="badge ${typeClass}">${evt.source_type}</span></td>
+                                    <td>${evt.start_time}</td>
+                                    <td>${peakSoft}</td>
+                                    <td>${peakHard}</td>
+                                    <td>${evt.end_time}</td>
+                                    <td>${rateSoft}</td>
+                                    <td>${rateHard}</td>
+                                    <td><strong>${delayText}</strong></td>
+                                </tr>
+                            `;
+                        });
+                        catalogueBody.innerHTML = html;
+                    }
+                })
+                .catch(err => console.error("Error loading catalogue:", err));
+        }
+
+        // Simulation Loop
+        function playSimulation() {
+            isPlaying = true;
+            playBtn.textContent = "Pause Simulation";
+            playBtn.style.background = "linear-gradient(135deg, var(--accent-red), #990022)";
+            playBtn.style.boxShadow = "var(--glow-red)";
+            
+            timerId = setInterval(simulationStep, speed);
+        }
+
+        function pauseSimulation() {
+            isPlaying = false;
+            playBtn.textContent = "Play Simulation";
+            playBtn.style.background = "linear-gradient(135deg, var(--accent-cyan), #0077ff)";
+            playBtn.style.boxShadow = "var(--glow-cyan)";
+            
+            clearInterval(timerId);
+        }
+
+        function simulationStep() {
+            if (currentIndex >= dataPoints.length) {
+                pauseSimulation();
+                return;
+            }
+
+            const point = dataPoints[currentIndex];
+            const counts = point.counts;
+            const time = point.time;
+
+            // Keep track of rolling background window
+            rollingHistory.push(counts);
+            if (rollingHistory.length > 300) {
+                rollingHistory.shift();
+            }
+
+            // Math: Compute rolling statistics dynamically
+            let mean = counts;
+            let std = 0.0;
+            
+            if (rollingHistory.length > 10) {
+                // Exclude last few values to maintain baseline quiet profile
+                let baselineArray = rollingHistory.slice(0, -5);
+                
+                let sum = baselineArray.reduce((a, b) => a + b, 0);
+                mean = sum / baselineArray.length;
+                
+                let variance = baselineArray.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / baselineArray.length;
+                std = Math.sqrt(variance);
+                if (std === 0) std = 1.0;
+            } else {
+                mean = counts;
+                std = 1.0;
+            }
+
+            let zScore = (counts - mean) / std;
+            let threshold = mean + k_val * std;
+
+            // Update Telemetry Panel
+            valCounts.textContent = counts.toFixed(1);
+            valMean.textContent = mean.toFixed(1);
+            valStd.textContent = std.toFixed(1);
+            valZ.textContent = zScore.toFixed(2);
+
+            // Flare Trigger Logic
+            if (counts > threshold && rollingHistory.length > 20) {
+                triggerAlert(true, counts, zScore);
+            } else {
+                triggerAlert(false);
+            }
+
+            // Add data to chart
+            chartData.labels.push(time);
+            chartData.datasets[0].data.push(counts);
+            chartData.datasets[1].data.push(threshold);
+
+            // Limit chart size to latest 200 data points for performance
+            if (chartData.labels.length > 200) {
+                chartData.labels.shift();
+                chartData.datasets[0].data.shift();
+                chartData.datasets[1].data.shift();
+            }
+
+            chart.update();
+            currentIndex++;
+        }
+
+        // Trigger Glow & Warning Indicator
+        function triggerAlert(isActive, rate=0, z=0) {
+            if (isActive) {
+                alertCard.classList.add("active-alert");
+                alertTitle.textContent = "FLARE TRIGGERED!";
+                alertTitle.style.color = "var(--accent-red)";
+                alertSubtitle.textContent = `Anomaly detected at ${z.toFixed(1)}σ deviation.`;
+                statusDot.classList.add("active");
+            } else {
+                alertCard.classList.remove("active-alert");
+                alertTitle.textContent = "SYSTEM QUIET";
+                alertTitle.style.color = "var(--text-color)";
+                alertSubtitle.textContent = "Monitoring telemetry...";
+                statusDot.classList.remove("active");
+            }
+        }
+    </script>
+</body>
+</html>
