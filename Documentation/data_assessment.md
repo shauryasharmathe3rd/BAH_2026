@@ -6,7 +6,7 @@ This document presents a comprehensive assessment of the Solar Low Energy X-ray 
 
 ## 1. Instrument Specifications & Overview
 
-Derived from the [SoLEXS-UserManual.pdf](file:///home/shaurya/Documents/Antigravity/BAH_Project/Manuals/SoLEXS-UserManual.pdf) and [HEL1OS_UserManual.pdf](file:///home/shaurya/Documents/Antigravity/BAH_Project/Manuals/HEL1OS_UserManual.pdf):
+Derived from the [SoLEXS-UserManual.pdf](Manuals/SoLEXS-UserManual.pdf) and [HEL1OS_UserManual.pdf](Manuals/HEL1OS_UserManual.pdf):
 
 | Parameter | SoLEXS (Soft X-rays) | HEL1OS (Hard X-rays) |
 | :--- | :--- | :--- |

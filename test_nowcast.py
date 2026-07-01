@@ -2,33 +2,31 @@ import sys
 from pathlib import Path
 import pandas as pd
 
-from nowcast import Nowcaster
+from nowcast import (
+    Nowcaster, 
+    detect_flares_rolling_sigma, 
+    detect_flares_derivative,
+    load_and_preprocess_solexs
+)
 from data_pipeline import load_solexs_fits_table
 
 def test_inference():
-    # Paths to saved model and metadata
-    model_path = Path("nowcast_model.pt")
+    # Paths to saved metadata
     metadata_path = Path("nowcast_metadata.json")
     
-    if not model_path.exists() or not metadata_path.exists():
-        print("Error: Model weights or metadata files do not exist yet. Please wait for training to complete at least one epoch.")
-        sys.exit(1)
-        
     print("Loading Nowcaster...")
-    nowcaster = Nowcaster(model_path, metadata_path)
+    # Initialize Nowcaster (model_path is ignored by the statistical implementation)
+    nowcaster = Nowcaster(metadata_path=metadata_path)
     
-    # Path to test data
-    data_file = Path(r"C:\Users\USER\Documents\AL1_SLX_L1_20240507_v1.0\AL1_SLX_L1_20240507_v1.0\SDD2\AL1_SOLEXS_20240507_SDD2_L1.lc.gz")
-    if not data_file.exists():
-        print(f"Error: Test data file not found at {data_file}")
+    # Path to test data directory
+    data_dir = Path("Data/solexs_2026Jun29T175402251/AL1_SLX_L1_20240507_v1.0")
+    if not data_dir.exists():
+        print(f"Error: Test data directory not found at {data_dir}")
         sys.exit(1)
         
-    print(f"Loading test data from {data_file}...")
-    df = load_solexs_fits_table(data_file)
+    print(f"Loading test data from {data_dir}...")
+    df = load_and_preprocess_solexs(data_dir)
     print(f"Total rows loaded: {len(df)}")
-    
-    # Clean nulls
-    df = df.dropna(subset=["TIME", "COUNTS"]).reset_index(drop=True)
     
     # Find a flare region to test
     mean_counts = df['COUNTS'].mean()
@@ -41,23 +39,49 @@ def test_inference():
     quiet_idx = 100
     quiet_df = df.iloc[quiet_idx : quiet_idx + 60]
     
-    print("\n--- Testing Quiet Window ---")
+    print("\n--- Testing Nowcaster Predict on Quiet Window ---")
     print(f"Counts range in window: {quiet_df['COUNTS'].min():.2f} - {quiet_df['COUNTS'].max():.2f} counts/s")
     prob_quiet = nowcaster.predict(quiet_df)
-    print(f"Predicted Flare Probability: {prob_quiet * 100.0:.4f}%")
+    print(f"Predicted Flare Probability/Severity: {prob_quiet * 100.0:.4f}%")
     
     # Flare window
     if len(flare_indices) > 0:
-        # We start the window 59 steps before the first flare index, so the very last step in the window is the flare onset
         flare_idx = max(0, flare_indices[0] - 59)
         flare_df = df.iloc[flare_idx : flare_idx + 60]
         
-        print("\n--- Testing Flare Onset Window ---")
+        print("\n--- Testing Nowcaster Predict on Flare Onset Window ---")
         print(f"Counts range in window: {flare_df['COUNTS'].min():.2f} - {flare_df['COUNTS'].max():.2f} counts/s")
         prob_flare = nowcaster.predict(flare_df)
-        print(f"Predicted Flare Probability: {prob_flare * 100.0:.4f}%")
+        print(f"Predicted Flare Probability/Severity: {prob_flare * 100.0:.4f}%")
     else:
         print("\nNo flare timestamps found in the dataset using the threshold.")
+        
+    # --- Test Statistical Change-Detection Algorithms ---
+    print("\n====================================================")
+    print("Testing Statistical Algorithms on Entire Day of Data")
+    print("====================================================")
+    
+    print("\nRunning Adaptive Rolling Sigma Nowcaster (k=3.5)...")
+    sigma_flares = detect_flares_rolling_sigma(df, k=3.5, bg_window_size=600, min_duration_sec=5)
+    print(f"Detected {len(sigma_flares)} events:")
+    if not sigma_flares.empty:
+        for idx, row in sigma_flares.iterrows():
+            print(f"  Event {idx+1}:")
+            print(f"    Start time : {row['start_time']}")
+            print(f"    Peak time  : {row['peak_time']} (Peak Rate: {row['peak_rate']:.2f} cts/s)")
+            print(f"    End time   : {row['end_time']}")
+            print(f"    Total counts: {row['total_counts']:.2f}")
+            
+    print("\nRunning Rate-of-Rise Derivative Nowcaster (rise_threshold=10.0)...")
+    deriv_flares = detect_flares_derivative(df, rise_threshold=10.0, min_duration_sec=3)
+    print(f"Detected {len(deriv_flares)} events:")
+    if not deriv_flares.empty:
+        for idx, row in deriv_flares.iterrows():
+            print(f"  Event {idx+1}:")
+            print(f"    Start time : {row['start_time']}")
+            print(f"    Peak time  : {row['peak_time']} (Peak Rate: {row['peak_rate']:.2f} cts/s)")
+            print(f"    End time   : {row['end_time']}")
+            print(f"    Total counts: {row['total_counts']:.2f}")
 
 if __name__ == "__main__":
     test_inference()

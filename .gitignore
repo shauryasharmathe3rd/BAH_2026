@@ -15,3 +15,22 @@ __pycache__
 api_server.py
 Data/
 ProblemDescription.txt
+ProblemDescription.txt
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS metadata
+.DS_Store
+
+# Credentials and secrets
+.env
+*.env
+
+# Large model weights and checkpoints
+*.pth
+*.pt
+
+# Python bytecode
+*.pyc
