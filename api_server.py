@@ -10,9 +10,38 @@ import os
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import torch
 
 from nowcast import load_and_preprocess_solexs
 from verify_combined_instruments import load_preprocess_hel1os
+from architecture import ImprovedFlareForecasterLSTM, predict_flare
+
+# Initialize device and model
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+GLOBAL_MODEL = None
+
+def load_model():
+    global GLOBAL_MODEL
+    try:
+        model_weights_path = 'flare_lstm_weights.pth'
+        GLOBAL_MODEL = ImprovedFlareForecasterLSTM(
+            input_dim=2,
+            hidden_dim=128,
+            num_layers=3,
+            num_heads=4,
+            dropout=0.3,
+            output_dim=1,
+            bidirectional=True
+        )
+        if os.path.exists(model_weights_path):
+            GLOBAL_MODEL.load_state_dict(torch.load(model_weights_path, map_location=DEVICE))
+            GLOBAL_MODEL.to(DEVICE)
+            GLOBAL_MODEL.eval()
+            print(f"[SUCCESS] Forecasting model weights loaded on device: {DEVICE}")
+        else:
+            print(f"[WARNING] Model weights file not found at {model_weights_path}. Prediction endpoint will fail.")
+    except Exception as e:
+        print(f"[ERROR] Failed to load forecasting model: {e}")
 
 PORT = 8000
 DATA_DIRS = {
@@ -34,6 +63,13 @@ class DashboardHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         # Suppress request logs to keep terminal output clean
         pass
 
+    def do_OPTIONS(self):
+        self.send_response(200, "ok")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_GET(self):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
@@ -51,6 +87,15 @@ class DashboardHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             if path == "/" or path == "":
                 self.path = "/index.html"
             super().do_GET()
+
+    def do_POST(self):
+        parsed_url = urllib.parse.urlparse(self.path)
+        path = parsed_url.path
+
+        if path == "/api/predict":
+            self.handle_api_predict()
+        else:
+            self.send_json_error(404, "Not Found")
 
     def handle_api_stream(self, query_params):
         day = query_params.get("day", ["20240507"])[0]
@@ -126,10 +171,49 @@ class DashboardHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_json_error(500, f"Error loading master catalogue: {str(e)}")
 
+    def handle_api_predict(self):
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length == 0:
+                self.send_json_error(400, "Empty request body.")
+                return
+                
+            post_data = self.rfile.read(content_length)
+            payload = json.loads(post_data.decode('utf-8'))
+            
+            instrument = payload.get("instrument", "solexs")
+            sequence = payload.get("sequence", [])
+            
+            if len(sequence) != 60:
+                self.send_json_error(400, f"Sequence must contain exactly 60 data points, got {len(sequence)}.")
+                return
+                
+            sequence_arr = np.array(sequence, dtype=np.float32)
+            
+            global GLOBAL_MODEL
+            if GLOBAL_MODEL is None:
+                load_model()
+                
+            if GLOBAL_MODEL is None:
+                self.send_json_error(500, "Forecasting model is not loaded.")
+                return
+                
+            res = predict_flare(sequence_arr, instrument=instrument, model=GLOBAL_MODEL, device=DEVICE)
+            
+            time_val = sequence[-1][0]
+            self.send_json_response({
+                "time": int(time_val),
+                "flare_probability": res["flare_probability"],
+                "is_flare_predicted": res["is_flare_predicted"]
+            })
+        except Exception as e:
+            self.send_json_error(500, f"Error processing prediction: {str(e)}")
+
     def send_json_response(self, data, status_code=200):
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
@@ -138,6 +222,8 @@ class DashboardHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def start_server():
+    print("Pre-loading solar flare forecasting model...")
+    load_model()
     server_address = ('', PORT)
     httpd = http.server.HTTPServer(server_address, DashboardHTTPRequestHandler)
     print(f"\n====================================================")

@@ -209,6 +209,24 @@
             animation: blink 1s infinite alternate;
         }
 
+        .status-dot.active-warning {
+            background-color: #9933ff;
+            box-shadow: 0 0 10px rgba(153, 51, 255, 0.7);
+            animation: blink 1.2s infinite alternate;
+        }
+
+        .alert-card.active-forecast {
+            background: rgba(153, 51, 255, 0.15);
+            border-color: #9933ff;
+            box-shadow: 0 0 25px rgba(153, 51, 255, 0.4);
+        }
+
+        .alert-card.double-trigger {
+            background: linear-gradient(135deg, rgba(255, 51, 102, 0.25), rgba(153, 51, 255, 0.25));
+            border-color: var(--accent-red);
+            box-shadow: var(--glow-red), 0 0 25px rgba(153, 51, 255, 0.5);
+        }
+
         /* Simulation Buttons */
         .btn-primary {
             background: linear-gradient(135deg, var(--accent-cyan), #0077ff);
@@ -233,7 +251,7 @@
         /* Telemetry Cards */
         .telemetry-row {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 16px;
         }
 
@@ -263,6 +281,7 @@
         .telemetry-card.cyan::before { background: var(--accent-cyan); }
         .telemetry-card.orange::before { background: var(--accent-orange); }
         .telemetry-card.red::before { background: var(--accent-red); }
+        .telemetry-card.purple::before { background: #9933ff; }
 
         .telemetry-label {
             font-size: 11px;
@@ -455,6 +474,10 @@
                     <span class="telemetry-label">Z-Score Value</span>
                     <span class="telemetry-value" id="valZ">0.00</span>
                 </div>
+                <div class="telemetry-card purple" id="forecastCard">
+                    <span class="telemetry-label">Forecast Prob</span>
+                    <span class="telemetry-value" id="valForecastProb">0.0%</span>
+                </div>
             </div>
 
             <!-- Chart panel -->
@@ -507,6 +530,10 @@
 
         // Live stats tracking
         let rollingHistory = [];
+        let isPredicting = false;
+        let isNowcasted = false;
+        let isForecasted = false;
+        let latestForecastProb = 0.0;
 
         // DOM elements
         const playBtn = document.getElementById("playBtn");
@@ -539,7 +566,8 @@
                     borderColor: '#00f0ff',
                     borderWidth: 1.5,
                     fill: false,
-                    pointRadius: 0
+                    pointRadius: 0,
+                    yAxisID: 'y'
                 },
                 {
                     label: 'Sigma Threshold (μ + kσ)',
@@ -548,7 +576,18 @@
                     borderWidth: 1.5,
                     borderDash: [5, 5],
                     fill: false,
-                    pointRadius: 0
+                    pointRadius: 0,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Forecast Probability (%)',
+                    data: [],
+                    borderColor: '#9933ff',
+                    backgroundColor: 'rgba(153, 51, 255, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    pointRadius: 0,
+                    yAxisID: 'yForecast'
                 }
             ]
         };
@@ -566,8 +605,25 @@
                         ticks: { color: '#8c8ca0', maxTicksLimit: 10 }
                     },
                     y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
                         grid: { color: 'rgba(255, 255, 255, 0.05)' },
                         ticks: { color: '#8c8ca0' }
+                    },
+                    yForecast: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#8c8ca0' },
+                        title: {
+                            display: true,
+                            text: 'Forecast Probability (%)',
+                            color: '#8c8ca0'
+                        }
                     }
                 },
                 plugins: {
@@ -624,6 +680,7 @@
             chartData.labels = [];
             chartData.datasets[0].data = [];
             chartData.datasets[1].data = [];
+            chartData.datasets[2].data = [];
             chartData.datasets[0].borderColor = instrument === "solexs" ? '#00f0ff' : '#ff9900';
             chart.update();
 
@@ -699,6 +756,18 @@
             clearInterval(timerId);
         }
 
+        function updateAlertStatus() {
+            if (isNowcasted && isForecasted) {
+                triggerAlert("DOUBLE_TRIGGER", latestForecastProb);
+            } else if (isNowcasted) {
+                triggerAlert("NOWCAST_ONLY", latestForecastProb);
+            } else if (isForecasted) {
+                triggerAlert("FORECAST_ONLY", latestForecastProb);
+            } else {
+                triggerAlert("QUIET");
+            }
+        }
+
         function simulationStep() {
             if (currentIndex >= dataPoints.length) {
                 pauseSimulation();
@@ -743,23 +812,76 @@
             valStd.textContent = std.toFixed(1);
             valZ.textContent = zScore.toFixed(2);
 
-            // Flare Trigger Logic
-            if (counts > threshold && rollingHistory.length > 20) {
-                triggerAlert(true, counts, zScore);
+            // Flare Trigger Logic (Nowcast)
+            isNowcasted = (counts > threshold && rollingHistory.length > 20);
+
+            // Trigger API request for forecasting if we have enough points (at least 60)
+            if (currentIndex >= 59) {
+                if (!isPredicting) {
+                    isPredicting = true;
+                    // Gather the last 60 points: array of [time, counts]
+                    const sequence = dataPoints.slice(currentIndex - 59, currentIndex + 1).map(pt => [pt.time, pt.counts]);
+                    const instrument = instSelect.value;
+                    
+                    fetch("/api/predict", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            instrument: instrument,
+                            sequence: sequence
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(result => {
+                        isPredicting = false;
+                        if (result.error) {
+                            console.error("Prediction error:", result.error);
+                            return;
+                        }
+                        
+                        const prob = result.flare_probability;
+                        const isPred = result.is_flare_predicted;
+                        
+                        latestForecastProb = prob * 100;
+                        isForecasted = isPred;
+                        
+                        // Update the telemetry value instantly
+                        document.getElementById("valForecastProb").textContent = `${latestForecastProb.toFixed(1)}%`;
+                        
+                        // Align with chart point
+                        const labelIndex = chartData.labels.indexOf(result.time);
+                        if (labelIndex !== -1) {
+                            chartData.datasets[2].data[labelIndex] = latestForecastProb;
+                            chart.update();
+                        }
+                        
+                        updateAlertStatus();
+                    })
+                    .catch(err => {
+                        isPredicting = false;
+                        console.error("Fetch prediction error:", err);
+                    });
+                }
             } else {
-                triggerAlert(false);
+                latestForecastProb = 0.0;
+                isForecasted = false;
+                document.getElementById("valForecastProb").textContent = "0.0%";
             }
+
+            updateAlertStatus();
 
             // Add data to chart
             chartData.labels.push(time);
             chartData.datasets[0].data.push(counts);
             chartData.datasets[1].data.push(threshold);
+            chartData.datasets[2].data.push(latestForecastProb);
 
             // Limit chart size to latest 200 data points for performance
             if (chartData.labels.length > 200) {
                 chartData.labels.shift();
                 chartData.datasets[0].data.shift();
                 chartData.datasets[1].data.shift();
+                chartData.datasets[2].data.shift();
             }
 
             chart.update();
@@ -767,19 +889,33 @@
         }
 
         // Trigger Glow & Warning Indicator
-        function triggerAlert(isActive, rate=0, z=0) {
-            if (isActive) {
-                alertCard.classList.add("active-alert");
-                alertTitle.textContent = "FLARE TRIGGERED!";
+        function triggerAlert(state, prob = 0.0) {
+            // Remove all custom alert classes first
+            alertCard.classList.remove("active-alert", "active-forecast", "double-trigger");
+            statusDot.classList.remove("active", "active-warning");
+            
+            if (state === "DOUBLE_TRIGGER") {
+                alertCard.classList.add("double-trigger");
+                alertTitle.textContent = "CRITICAL ALERT!";
                 alertTitle.style.color = "var(--accent-red)";
-                alertSubtitle.textContent = `Anomaly detected at ${z.toFixed(1)}σ deviation.`;
+                alertSubtitle.textContent = `Nowcast Active + Forecast ${prob.toFixed(1)}%`;
                 statusDot.classList.add("active");
+            } else if (state === "NOWCAST_ONLY") {
+                alertCard.classList.add("active-alert");
+                alertTitle.textContent = "FLARE NOWCAST!";
+                alertTitle.style.color = "var(--accent-red)";
+                alertSubtitle.textContent = `Statistical nowcast active.`;
+                statusDot.classList.add("active");
+            } else if (state === "FORECAST_ONLY") {
+                alertCard.classList.add("active-forecast");
+                alertTitle.textContent = "FLARE FORECAST!";
+                alertTitle.style.color = "#d4afff";
+                alertSubtitle.textContent = `LSTM Predicts ${prob.toFixed(1)}% Probability.`;
+                statusDot.classList.add("active-warning");
             } else {
-                alertCard.classList.remove("active-alert");
                 alertTitle.textContent = "SYSTEM QUIET";
                 alertTitle.style.color = "var(--text-color)";
                 alertSubtitle.textContent = "Monitoring telemetry...";
-                statusDot.classList.remove("active");
             }
         }
     </script>
