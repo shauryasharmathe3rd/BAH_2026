@@ -17,14 +17,14 @@ from verify_combined_instruments import load_preprocess_hel1os
 PORT = 8000
 DATA_DIRS = {
     "20240507": {
-        "solexs": Path(r"C:\Users\USER\Documents\AL1_SLX_L1_20240507_v1.0"),
-        "hel1os": Path(r"C:\Users\USER\Downloads\hel1os_extracted\HLS_20240507_000006_26239sec_lev1_V111\2024\05\07\HLS_20240507_000006_26239sec_lev1_V111\czt\lightcurve_czt1.fits")
+        "solexs": Path("Data/solexs_2026Jun29T175402251/AL1_SLX_L1_20240507_v1.0"),
+        "hel1os": Path("Data/hel1os_2026Jun29T180143795/HLS_20240507_000006_26239sec_lev1_V111/2024/05/07/HLS_20240507_000006_26239sec_lev1_V111/czt/lightcurve_czt1.fits")
     },
     "20240509": {
-        "solexs": Path(r"C:\Users\USER\Documents\AL1_SLX_L1_20240509_v1.0")
+        "solexs": Path("Data/solexs_2026Jun29T175809476/AL1_SLX_L1_20240509_v1.0")
     },
     "20240510": {
-        "solexs": Path(r"C:\Users\USER\Documents\AL1_SLX_L1_20240510_v1.0")
+        "solexs": Path("Data/solexs_2026Jun29T175954834/AL1_SLX_L1_20240510_v1.0")
     }
 }
 

@@ -38,8 +38,8 @@ def load_preprocess_hel1os(file_path: Path) -> pd.DataFrame:
 
 def run_verification():
     # Paths to datasets
-    solexs_dir = Path(r"C:\Users\USER\Documents\AL1_SLX_L1_20240507_v1.0")
-    hel1os_file = Path(r"C:\Users\USER\Downloads\hel1os_extracted\HLS_20240507_000006_26239sec_lev1_V111\2024\05\07\HLS_20240507_000006_26239sec_lev1_V111\czt\lightcurve_czt1.fits")
+    solexs_dir = Path("Data/solexs_2026Jun29T175402251/AL1_SLX_L1_20240507_v1.0")
+    hel1os_file = Path("Data/hel1os_2026Jun29T180143795/HLS_20240507_000006_26239sec_lev1_V111/2024/05/07/HLS_20240507_000006_26239sec_lev1_V111/czt/lightcurve_czt1.fits")
     
     if not solexs_dir.exists():
         print(f"Error: SoLEXS directory not found at {solexs_dir}")

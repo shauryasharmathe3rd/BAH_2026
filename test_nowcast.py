@@ -19,7 +19,7 @@ def test_inference():
     nowcaster = Nowcaster(metadata_path=metadata_path)
     
     # Path to test data directory
-    data_dir = Path(r"C:\Users\USER\Documents\AL1_SLX_L1_20240507_v1.0")
+    data_dir = Path("Data/solexs_2026Jun29T175402251/AL1_SLX_L1_20240507_v1.0")
     if not data_dir.exists():
         print(f"Error: Test data directory not found at {data_dir}")
         sys.exit(1)

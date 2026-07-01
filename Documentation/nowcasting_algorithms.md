@@ -1,6 +1,6 @@
 # Solar Flare Algorithmic Nowcasting: Methodologies and Implementation
 
-This document outlines suitable algorithms for real-time detection (nowcasting) of solar flares using Aditya-L1 SoLEXS (soft X-ray) and HEL1OS (hard X-ray) light curves, along with a concrete strategy to build independent event catalogues and merge them into a single master catalogue as specified in [ProblemDescription.txt](file:///home/shaurya/Documents/Antigravity/BAH_Project/ProblemDescription.txt).
+This document outlines suitable algorithms for real-time detection (nowcasting) of solar flares using Aditya-L1 SoLEXS (soft X-ray) and HEL1OS (hard X-ray) light curves, along with a concrete strategy to build independent event catalogues and merge them into a single master catalogue as specified in [ProblemDescription.txt](../ProblemDescription.txt).
 
 ---
 
@@ -48,7 +48,7 @@ CUSUM is a sequential analysis technique used to detect small changes in the mea
 
 ## 2. Instrument-Specific Nowcasting Strategies
 
-Because SoLEXS and HEL1OS measure different physical processes, their signals look very different (as documented in [data_assessment.md](file:///home/shaurya/Documents/Antigravity/BAH_Project/data_assessment.md)):
+Because SoLEXS and HEL1OS measure different physical processes, their signals look very different (as documented in [data_assessment.md](../data_assessment.md)):
 
 ```
                      Rise Phase             Peak Flux             Decay Phase

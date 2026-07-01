@@ -401,7 +401,7 @@ class Nowcaster:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aditya-L1 Statistical Nowcasting CLI")
-    parser.add_argument("--data_dir", type=str, default=r"C:\Users\USER\Documents\AL1_SLX_L1_20240507_v1.0",
+    parser.add_argument("--data_dir", type=str, default="Data/solexs_2026Jun29T175402251/AL1_SLX_L1_20240507_v1.0",
                         help="Path to SoLEXS FITS folder")
     parser.add_argument("--algo", type=str, choices=["sigma", "derivative", "both"], default="both",
                         help="Algorithm to run")
